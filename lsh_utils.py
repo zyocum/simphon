@@ -5,9 +5,6 @@ import numpy as np
 import sys
 import mmh3
 
-from cityhash import CityHash32
-from cityhash import CityHash64
-from cityhash import CityHash128
 from dataclasses import dataclass
 from dataclasses import field
 from functools import lru_cache
@@ -23,11 +20,6 @@ hashes = {
     128: mmh3.hash128 # 128 bit murmurhash
 }
 
-hashes = {
-    32: CityHash32,
-    64: CityHash64,
-    128: CityHash128
-}
 hashsize = 64
 
 def ngrams(iterable, n=1):

@@ -19,7 +19,7 @@ HASHES = {
     128: mmh3.hash128 # 128 bit murmurhash
 }
 
-HASHSIZE = 64
+HASHSIZE = 128
 
 def ngrams(iterable, n=1):
     """Generate ngrams from an iterable in a totally lazy fashion
