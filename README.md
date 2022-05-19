@@ -61,5 +61,20 @@ ranking pairs by bitwise similarity: 100%|████████████�
   8  (eng) Carlos /k ɑ ɹ l oʊ s/          (eng) Charles /t̠ʃ ɑ ɹ l z/                                       88               0.656
   9  (eng) Alex /æ l ə k s/               (eng) Alexi /ə l ɛ k s i/                                        88               0.656
  10  (eng) Jonathan /d̠ʒ ɑ n ə θ ə n/      (eng) Tyler /t aɪ l ə r/                                         88               0.656
+ 11  (eng) Jennifer /d̠ʒ ɛ n ə f ɚ/        (eng) Philip /f ɪ l ɪ p/                                         90               0.648
+ 12  (eng) Catherine /k æ θ ə r ɪ n/      (eng) Tyler /t aɪ l ə r/                                         91               0.645
+ 13  (eng) Alexander /æ l ə k z æ n d ɚ/  (eng) Alexis /ə l ɛ k s ɪ s/                                     92               0.641
+ 14  (eng) Jennifer /d̠ʒ ɛ n ə f ɚ/        (eng) Tyler /t aɪ l ə r/                                         92               0.641
+ 15  (eng) Kathy /k æ θ i/                (eng) Matthew /m æ θ j u/                                        93               0.637
+ 16  (eng) Alexi /ə l ɛ k s i/            (eng) Alexis /ə l ɛ k s ɪ s/                                     94               0.633
+ 17  (eng) Alex /æ l ə k s/               (eng) Alexis /ə l ɛ k s ɪ s/                                     94               0.633
+ 18  (eng) Kathy /k æ θ i/                (eng) Nathan /n eɪ θ ə n/                                        95               0.629
+ 19  (eng) Matt /m æ t/                   (eng) Nate /n eɪ t/                                              95               0.629
+ 20  (eng) Catherine /k æ θ ə r ɪ n/      (eng) Nathan /n eɪ θ ə n/                                        95               0.629
+ 21  (eng) Alexis /ə l ɛ k s ɪ s/         (eng) Nathaniel /n ə θ æ n j ə l/                                95               0.629
+ 22  (eng) Jennifer /d̠ʒ ɛ n ə f ɚ/        (eng) Jonathan /d̠ʒ ɑ n ə θ ə n/                                  96               0.625
+ 23  (eng) Johnny /d̠ʒ ɑ n i/              (eng) Kathy /k æ θ i/                                            96               0.625
+ 24  (eng) John /d̠ʒ ɑ n/                  (eng) Johnny /d̠ʒ ɑ n i/                                          96               0.625
+ 25  (eng) Mike /m aɪ k/                  (eng) Nick /n ɪ k/                                               96               0.625
 ...
 ```
