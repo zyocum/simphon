@@ -2,22 +2,45 @@
 
 import pandas as pd
 import numpy as np
-import mmh3
+import xxhash
 
+from collections.abc import Hashable
+from functools import lru_cache
 from itertools import combinations
 from numpy.lib.stride_tricks import sliding_window_view
 from operator import itemgetter
 from pathlib import Path
 
 hashes = {
-    32: mmh3.hash, # 32 bit murmurhash
-    64: lambda x: mmh3.hash64(x)[0], # mmh3.hash64 returns two 64 bit hashes, so we take the first one
-    128: mmh3.hash128 # 128 bit murmurhash
+    32: xxhash.xxh32_intdigest,
+    64: xxhash.xxh64_intdigest,
+    128: xxhash.xxh128_intdigest,
 }
 
 n = 3
 hashsize = 128
 window = 10
+
+class Hashable_Ndarray(Hashable, np.ndarray):
+    """An np.ndarray subclass that is frozen (uneditable) and is hashable
+    
+    Cf. https://machineawakening.blogspot.com/2011/03/making-numpy-ndarrays-hashable.html"""
+    
+    def __new__(cls, values):
+        return np.array(values, order='C').view(cls)
+    
+    def __init__(self, values):
+        self.flags.writeable = False
+        self.__hash = xxhash.xxh32_intdigest(self)
+    
+    def __eq__(self, other):
+        return np.all(np.ndarray.__eq__(self, other))
+    
+    def __hash__(self):
+        return self.__hash
+    
+    def __setitem__(self, key, value):
+        raise Exception('hashable arrays are read-only')
 
 def ngrams(iterable, n=n):
     """Generate ngrams from an iterable in a totally lazy fashion
@@ -36,6 +59,7 @@ def ngrams(iterable, n=n):
         enumerate(tee(iter(iterable), n))
     ))
 
+@lru_cache
 def segment_simhash(m, n=n, bits=hashsize):
     """Compute a simhash over the bytes of n-grams of rows in a matrix
     
@@ -54,16 +78,18 @@ def segment_simhash(m, n=n, bits=hashsize):
     """
     hashf = hashes[bits]
     lsh = np.zeros(bits)
-    n = min(len(m), n)
+    if len(m) < n: # too small
+        return 0
     for ngram in ngrams(m, n=n):
         for j in range(bits):
-            data = b'\x00' + b''.join(segment.tobytes() for segment in ngram)
+            data = b''.join(segment.tobytes() for segment in ngram)
             if hashf(data) & (1 << j):
                 lsh[j] += 1
             else:
                 lsh[j] -= 1
     return sum(int(b > 0) << i for (i, b) in enumerate(reversed(lsh)))
 
+@lru_cache
 def stride_simhash(m, n=n, bits=hashsize):
     """A simhash using a sliding window strategy for feature extraction.
     
@@ -105,21 +131,37 @@ def stride_simhash(m, n=n, bits=hashsize):
     for i, axis in enumerate(sliding_window_view(m, window_shape=window_shape)):
         for view in axis:
             for j in range(bits):
-                data = int.to_bytes(i, length=1, byteorder='big') + view.tobytes()
+                data = view.tobytes()
                 if hashf(data) & (1 << j):
                     lsh[j] += 1
                 else:
                     lsh[j] -= 1
     return sum(int(b > 0) << i for (i, b) in enumerate(reversed(lsh)))
 
+@lru_cache
 def matrix_simhash(m, n=n, bits=hashsize):
     """Compute a simhash by XORing simhashes of the rows and columns of a phoneme matrix
-    and also a simhash based on a stride-based sliding window over the phoneme matrix"""
-    # the lower bits are a simhash(rows) XOR simhash(columns)
-    simhash = segment_simhash(m, n=n, bits=bits) # simhash of rows
-    simhash ^= segment_simhash(m.T, n=n, bits=bits) # simhash of columns
-    # the stride simhash bits are bitshifted left so as not to overl the row/column bits
-    simhash ^= stride_simhash(m, n=n, bits=bits) << bits
+    and also a simhash using a stride-based sliding window over the phoneme matrix"""
+    simhash = 0
+    # we pad the beginning and end of the matrix (n // 2) rows so that it will always
+    # be large enough for our n-gram features to be informative
+    left_padding = [np.full(m[0].shape, fill_value='^')] * (n // 2) 
+    right_padding = [np.full(m[0].shape, fill_value='$')] * (n // 2) 
+    m = np.concatenate((left_padding, m, right_padding), axis=0)
+    # iterate over variable n-gram sizes from [2...n] (we skip 1-grams because they aren't informative enough)
+    for i in range(2, n+1):
+        # simhashes for 3 different features are bit-shifted by multiples
+        # of the bit width and the feature index so as not to interfere with one another
+        
+        # 2D column n-grams features
+        simhash ^= segment_simhash(Hashable_Ndarray(m), n=i, bits=bits) << (i + 0) * bits
+        # 2D row n-grams features
+        simhash ^= segment_simhash(Hashable_Ndarray(m.T), n=i, bits=bits) << (i + 1) * bits
+        # 2D stride-based n-grams features
+        simhash ^= stride_simhash(Hashable_Ndarray(m), n=i, bits=bits) << (i + 2) * bits
+        
+        # for each iteration, shift all the bits left so the next iteration doesn't interfere
+        simhash << simhash.bit_length()
     return simhash
 
 def load_phoible(path='phoible.csv', cache=True):
@@ -142,13 +184,14 @@ def simdiff(a, b):
     return difference
 
 def ranked_pairs(tokens, n=n, bits=hashsize, window=window):
-    """Rank pairs of phonemic sequences sorted by LSH similarity of the phonetic feature matrices
+    """Generate ranked pairs of tokens sorted by their LSH similarity
     
-    Will generate records of the form: ((phonemes:str, phonemes:str), LSH_bitwise_difference:int)
+    Will generate records of the form: ((a:Token, b:Token), difference:int)
     """
     d = {}
+    actual_bitwidth = bits * (n - 1) * 3 # actual simhash width in bits is dependent on n and the number of features
     # rotate over each bit in the simhash
-    for i in range(2*bits):
+    for i in range(actual_bitwidth):
         def lsh(token):
             return token.simhash_rotate(rotations=i, n=n, bits=bits)
         for ngram in ngrams(sorted(tokens, key=lsh), n=window):
@@ -184,11 +227,12 @@ def compare(
         desc='ranking pairs by bitwise similarity',
         unit='pair'
     )
+    actual_bitwidth = bits * (n - 1) * 3
     return pd.DataFrame(
         {
             'a': a,
             'b': b,
             'simhash difference (in bits)': difference,
-            'similarity score': f'{1.0 - (difference/(2*bits)):0.3}'
+            'similarity score': f'{1.0 - (difference/actual_bitwidth):0.3}'
         } for ((a, b), difference) in pairs
     )

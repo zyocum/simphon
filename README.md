@@ -17,7 +17,7 @@ $ source simphon/bin/activate
 To use the virtual environment in the Jupyter notebook, run:
 
 ```zsh
-(simphon) $ ipython kernel install --user --name=ipa
+(simphon) $ ipython kernel install --user --name=simphon
 (simphon) $ jupyter notebook simphon.ipynb
 ```
 
@@ -30,8 +30,11 @@ Then, choose the kernel with the name of the virtual environment:
 There is a CLI you can run from `simphon.py`:
 
 ```zsh
-(simphon) $ ./simphon.py -h
+(simphon) $ ./simphon.py -h                            
 usage: simphon.py [-h] [-n N_GRAMS_SIZE] [-b {32,64,128}] [-w WINDOW]
+
+Script with a CLI to show a simple demonstration of phonemic token matching. The similarity of tokens is computed via simhashing of 2D
+matrices formed by stacking PHOIBLE phoneme feature vectors for sequences of phonemes.
 
 options:
   -h, --help            show this help message and exit
@@ -46,35 +49,35 @@ options:
 Example output formatted with `tabulate`:
 
 ```zsh
-(simphon) $ ./simphon.py -n 3 -b 128 -w 10 | tabulate -1s $'\t' -F '0.3f'
-ranking pairs by bitwise similarity: 100%|█████████████████████████████████████████████████| 703/703 [00:00<00:00, 1279772.44pair/s]
-     a                                    b                                      simhash difference (in bits)    similarity score
----  -----------------------------------  -----------------------------------  ------------------------------  ------------------
-  0  (eng) Zach /z æ k/                   (eng) Zak /z æ k/                                                 0               1.000
-  1  (eng) Catherine /k æ θ ə r ə n/      (eng) Catherine /k æ θ ə r ɪ n/                                  54               0.789
-  2  (eng) Brad /b ɹ æ d/                 (eng) Brett /b ɹ ɛ t/                                            68               0.734
-  3  (eng) Carl /k ɑ ɹ l/                 (eng) Carlos /k ɑ ɹ l oʊ s/                                      74               0.711
-  4  (eng) Jenny /d̠ʒ ɛ n i/               (eng) Johnny /d̠ʒ ɑ n i/                                          77               0.699
-  5  (eng) Matt /m æ t/                   (eng) Mike /m aɪ k/                                              80               0.688
-  6  (eng) Alex /æ l ə k s/               (eng) Alexander /æ l ə k z æ n d ɚ/                              84               0.672
-  7  (eng) Jenny /d̠ʒ ɛ n i/               (eng) Philip /f ɪ l ɪ p/                                         86               0.664
-  8  (eng) Carlos /k ɑ ɹ l oʊ s/          (eng) Charles /t̠ʃ ɑ ɹ l z/                                       88               0.656
-  9  (eng) Alex /æ l ə k s/               (eng) Alexi /ə l ɛ k s i/                                        88               0.656
- 10  (eng) Jonathan /d̠ʒ ɑ n ə θ ə n/      (eng) Tyler /t aɪ l ə r/                                         88               0.656
- 11  (eng) Jennifer /d̠ʒ ɛ n ə f ɚ/        (eng) Philip /f ɪ l ɪ p/                                         90               0.648
- 12  (eng) Catherine /k æ θ ə r ɪ n/      (eng) Tyler /t aɪ l ə r/                                         91               0.645
- 13  (eng) Alexander /æ l ə k z æ n d ɚ/  (eng) Alexis /ə l ɛ k s ɪ s/                                     92               0.641
- 14  (eng) Jennifer /d̠ʒ ɛ n ə f ɚ/        (eng) Tyler /t aɪ l ə r/                                         92               0.641
- 15  (eng) Kathy /k æ θ i/                (eng) Matthew /m æ θ j u/                                        93               0.637
- 16  (eng) Alexi /ə l ɛ k s i/            (eng) Alexis /ə l ɛ k s ɪ s/                                     94               0.633
- 17  (eng) Alex /æ l ə k s/               (eng) Alexis /ə l ɛ k s ɪ s/                                     94               0.633
- 18  (eng) Kathy /k æ θ i/                (eng) Nathan /n eɪ θ ə n/                                        95               0.629
- 19  (eng) Matt /m æ t/                   (eng) Nate /n eɪ t/                                              95               0.629
- 20  (eng) Catherine /k æ θ ə r ɪ n/      (eng) Nathan /n eɪ θ ə n/                                        95               0.629
- 21  (eng) Alexis /ə l ɛ k s ɪ s/         (eng) Nathaniel /n ə θ æ n j ə l/                                95               0.629
- 22  (eng) Jennifer /d̠ʒ ɛ n ə f ɚ/        (eng) Jonathan /d̠ʒ ɑ n ə θ ə n/                                  96               0.625
- 23  (eng) Johnny /d̠ʒ ɑ n i/              (eng) Kathy /k æ θ i/                                            96               0.625
- 24  (eng) John /d̠ʒ ɑ n/                  (eng) Johnny /d̠ʒ ɑ n i/                                          96               0.625
- 25  (eng) Mike /m aɪ k/                  (eng) Nick /n ɪ k/                                               96               0.625
+(simphon) $ ./simphon.py | tabulate -1s $'\t' -F '0.3f'
+ranking pairs by bitwise similarity: 100%|█████████████████████████████████████████████████████| 1770/1770 [00:00<00:00, 1705079.94pair/s]
+      a                                         b                                      simhash difference (in bits)    similarity score
+----  ----------------------------------------  -----------------------------------  ------------------------------  ------------------
+   0  (eng) Zach /z æ k/                        (eng) Zack /z æ k/                                                0               1.000
+   1  (heb) צוֹפִית /ts o f i t/                  (heb) צוּפִית /ts u f i t/                                        133               0.827
+   2  (eng) Jenny /d̠ʒ ɛ n i/                    (eng) Johnny /d̠ʒ ɑ n i/                                         145               0.811
+   3  (eng) Sophia /s oʊ f i ə/                 (eng) Tsofit /s oʊ f i t/                                       149               0.806
+   4  (eng) Tsofit /s oʊ f i t/                 (heb) צוּפִית /ts u f i t/                                        160               0.792
+   5  (eng) Zach /z æ k/                        (heb) זך /z a k/                                                163               0.788
+   6  (eng) Zack /z æ k/                        (heb) זך /z a k/                                                163               0.788
+   7  (ell) Σοφία /s o f i ɐ/                   (eng) Sophia /s oʊ f i ə/                                       165               0.785
+   8  (heb) עמת /a m ɪ t/                       (hin) अमित /aː m ɪ t̪/                                           171               0.777
+   9  (eng) Tsofit /s oʊ f i t/                 (heb) צוֹפִית /ts o f i t/                                        171               0.777
+  10  (eng) Zachariah /z æ k ə ɹ aɪ ə/          (eng) Zachary /z æ k ə ɹ i/                                     172               0.776
+  11  (eng) Sophia /s oʊ f i ə/                 (eng) Sophie /s oʊ f i/                                         179               0.767
+  12  (eng) Nate /n eɪ t/                       (eng) Nick /n ɪ k/                                              180               0.766
+  13  (eng) Amit /ɑ m i t/                      (hin) अमित /aː m ɪ t̪/                                           181               0.764
+  14  (eng) Amit /ɑ m i t/                      (heb) עמת /a m ɪ t/                                             182               0.763
+  15  (eng) Sophie /s oʊ f i/                   (eng) Tsofit /s oʊ f i t/                                       182               0.763
+  16  (eng) Mike /m aɪ k/                       (eng) Nick /n ɪ k/                                              185               0.759
+  17  (eng) Zachariah /z æ k ə ɹ aɪ ə/          (heb) זְכַרְיָה /z ə̆ x a ʁ j a/                                     187               0.757
+  18  (eng) Nick /n ɪ k/                        (eng) Zach /z æ k/                                              188               0.755
+  19  (eng) Nick /n ɪ k/                        (eng) Zack /z æ k/                                              188               0.755
+  20  (eng) Matt /m æ t/                        (eng) Nate /n eɪ t/                                             190               0.753
+  21  (eng) Kat /k æ t/                         (heb) זך /z a k/                                                190               0.753
+  22  (eng) Katsuya /k æ t s uː j ə/            (rus) Алексей /a lʲ e k sʲ e j/                                 191               0.751
+  23  (eng) Katsuya /k æ t s uː j ə/            (eng) Zachariah /z æ k ə ɹ aɪ ə/                                191               0.751
+  24  (eng) Zach /z æ k/                        (eng) Zachary /z æ k ə ɹ i/                                     191               0.751
+  25  (eng) Zachary /z æ k ə ɹ i/               (eng) Zack /z æ k/                                              191               0.751
 ...
 ```
