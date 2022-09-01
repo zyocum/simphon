@@ -211,11 +211,11 @@ def compare(
 ):
     """Return a datafram comparing pairs of Tokens sorted by phonemic similarity
     
-    Datafram columns:
+    Dataframe columns:
     "a": the first token of the pair
     "b": the second token of the pair
     "simhash difference (in bits)": the bitwise difference between the simhash of a and the simhash of b
-    "sigmage(phonemic)": the phonemic similarity score for the pair (a, b) computed by: 1 - (difference/(2*bits)
+    "sigma(phonemic)": the phonemic similarity score for the pair (a, b) computed by: 1 - (difference/(2*bits)
     """
     try:
         get_ipython
