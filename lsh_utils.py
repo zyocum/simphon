@@ -13,18 +13,18 @@ from xxhash import xxh128
 
 import sys
 
-DEFAULT_SALT = 0
+DEFAULT_SEED = 0
 DEFAULT_HASHSIZE = 256
 DEFAULT_NGRAM_SIZE = 4
 DEFAULT_WINDOW_SIZE = 2
 
-def hashf(bytes_, bits=DEFAULT_HASHSIZE, salt=DEFAULT_SALT):
+def hashf(bytes_, bits=DEFAULT_HASHSIZE, seed=DEFAULT_SEED):
     """Fast underlying hashing function that can be sized to an arbitrary number of bits"""
     hash_bits = 0
     passes = 0
     xxh_size = 128 # number of bits in the underlying xxhash
     while (passes * xxh_size) < bits:
-        hash_bits ^= xxh128(bytes_, seed=salt+passes).intdigest() << (xxh_size * passes)
+        hash_bits ^= xxh128(bytes_, seed=seed+passes).intdigest() << (xxh_size * passes)
         passes += 1
     # check if we have too many bits
     if hash_bits.bit_length() > bits:
@@ -37,7 +37,7 @@ class Hashable_Ndarray(Hashable, np.ndarray):
     Cf. https://machineawakening.blogspot.com/2011/03/making-numpy-ndarrays-hashable.html"""
     
     hashsize = DEFAULT_HASHSIZE
-    salt = DEFAULT_SALT
+    seed = DEFAULT_SEED
     
     def __new__(cls, values):
         return np.array(values, order='C').view(cls)
@@ -49,7 +49,7 @@ class Hashable_Ndarray(Hashable, np.ndarray):
         return np.all(np.ndarray.__eq__(self, other))
     
     def __hash__(self):
-        return hashf(self, bits=self.hashsize, salt=self.salt)
+        return hashf(self, bits=self.hashsize, seed=self.seed)
     
     def __setitem__(self, key, value):
         raise Exception('hashable arrays are read-only')
@@ -76,7 +76,7 @@ def segment_simhash(
     m,
     n=DEFAULT_NGRAM_SIZE,
     hashsize=DEFAULT_HASHSIZE,
-    salt=DEFAULT_SALT
+    seed=DEFAULT_SEED
 ):
     """Compute a simhash over the bytes of n-grams of rows in a matrix
     
@@ -99,7 +99,7 @@ def segment_simhash(
     for ngram in ngrams(m, n=n):
         for j in range(hashsize):
             data = b''.join(segment.tobytes() for segment in ngram)
-            if hashf(data, bits=hashsize, salt=salt) & (1 << j):
+            if hashf(data, bits=hashsize, seed=seed) & (1 << j):
                 lsh[j] += 1
             else:
                 lsh[j] -= 1
@@ -110,7 +110,7 @@ def stride_simhash(
     m,
     n=DEFAULT_NGRAM_SIZE,
     hashsize=DEFAULT_HASHSIZE,
-    salt=DEFAULT_SALT
+    seed=DEFAULT_SEED
 ):
     """A simhash using a sliding window strategy for feature extraction.
     
@@ -152,7 +152,7 @@ def stride_simhash(
         for view in axis:
             for j in range(hashsize):
                 data = view.tobytes()
-                if hashf(data, bits=hashsize, salt=salt) & (1 << j):
+                if hashf(data, bits=hashsize, seed=seed) & (1 << j):
                     lsh[j] += 1
                 else:
                     lsh[j] -= 1
@@ -175,7 +175,7 @@ def matrix_simhash(
     m,
     n=DEFAULT_NGRAM_SIZE,
     hashsize=DEFAULT_HASHSIZE,
-    salt=DEFAULT_SALT
+    seed=DEFAULT_SEED
 ):
     """Compute a simhash by XORing simhashes of the rows and columns of a phoneme matrix
     and also a simhash using a stride-based sliding window over the phoneme matrix"""
@@ -194,7 +194,7 @@ def matrix_simhash(
             for transform in matrix_transforms
         ]
         for j, (lsh, matrix) in enumerate(zip(lsh_features, matrices)):
-            simhash ^= lsh(matrix, n=i, hashsize=hashsize, salt=salt) << i * j * hashsize # shift the bits left so bits from different features/n-gram sizes don't clobber one another
+            simhash ^= lsh(matrix, n=i, hashsize=hashsize, seed=seed) << i * j * hashsize # shift the bits left so bits from different features/n-gram sizes don't clobber one another
     return simhash
 
 def load_phoible(path='phoible.csv', cache=True):

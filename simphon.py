@@ -20,7 +20,7 @@ from lsh_utils import matrix_simhash
 from lsh_utils import phoible
 from lsh_utils import DEFAULT_HASHSIZE
 from lsh_utils import DEFAULT_NGRAM_SIZE
-from lsh_utils import DEFAULT_SALT
+from lsh_utils import DEFAULT_SEED
 from lsh_utils import DEFAULT_WINDOW_SIZE
 from typing import ClassVar
 
@@ -71,7 +71,7 @@ class Token:
     graphemes: str
     phonemes: tuple
     hashsize: ClassVar[int] = DEFAULT_HASHSIZE
-    salt: ClassVar[int] = DEFAULT_SALT
+    seed: ClassVar[int] = DEFAULT_SEED
     
     def __str__(self):
         return f'({self.language}) 〈{self.graphemes}〉 /{" ".join(self.phonemes)}/'
@@ -87,7 +87,7 @@ class Token:
     def simhash(self, n=DEFAULT_NGRAM_SIZE):
         """Get this Token's simhash"""
         matrix = self.phonemes_matrix(self.phonemes, language=self.language)
-        return matrix_simhash(matrix, n=n, hashsize=self.hashsize, salt=self.salt)
+        return matrix_simhash(matrix, n=n, hashsize=self.hashsize, seed=self.seed)
     
     @lru_cache
     def simhash_rotate(self, rotations=1, n=DEFAULT_NGRAM_SIZE):
@@ -214,14 +214,14 @@ if __name__ == '__main__':
         help='sliding window size for comparing pairs in the list of pairs sorted by LSH bitwise difference',
     )
     parser.add_argument(
-        '-s', '--salt',
+        '-s', '--seed',
         type=int,
-        default=DEFAULT_SALT,
-        help='an integer salt value that will be added to the underlyin hash seed',
+        default=DEFAULT_SEED,
+        help='an integer seed value that will be added to the underlying hash seed',
     )
     args = parser.parse_args()
     Token.hashsize = args.bit_size
-    Token.salt = args.salt
+    Token.salt = args.seed
     print(
         compare(
             tokens,
