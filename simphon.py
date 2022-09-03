@@ -11,13 +11,18 @@ import numpy as np
 import pandas as pd
 
 from dataclasses import dataclass
+from dataclasses import field
 from functools import lru_cache
 from functools import total_ordering
 from lsh_utils import compare
-from lsh_utils import hashes
 from lsh_utils import Hashable_Ndarray
 from lsh_utils import matrix_simhash
 from lsh_utils import phoible
+from lsh_utils import DEFAULT_HASHSIZE
+from lsh_utils import DEFAULT_NGRAM_SIZE
+from lsh_utils import DEFAULT_SALT
+from lsh_utils import DEFAULT_WINDOW_SIZE
+from typing import ClassVar
 
 phoible_features = [
     'Phoneme',
@@ -65,9 +70,11 @@ class Token:
     language: str
     graphemes: str
     phonemes: tuple
+    hashsize: ClassVar[int] = DEFAULT_HASHSIZE
+    salt: ClassVar[int] = DEFAULT_SALT
     
     def __str__(self):
-        return f'({self.language}) {self.graphemes} /{" ".join(self.phonemes)}/'
+        return f'({self.language}) 〈{self.graphemes}〉 /{" ".join(self.phonemes)}/'
     
     def __hash__(self):
         return hash((self.language, self.graphemes, ' '.join(self.phonemes)))
@@ -77,25 +84,24 @@ class Token:
             (other.language, other.graphemes, ' '.join(other.phonemes))
     
     @lru_cache
-    def simhash(self, n=2, bits=128):
+    def simhash(self, n=DEFAULT_NGRAM_SIZE):
         """Get this Token's simhash"""
-        matrix = Token.phonemes_matrix(self.phonemes, language=self.language)
-        return matrix_simhash(matrix, n=n, bits=bits)
+        matrix = self.phonemes_matrix(self.phonemes, language=self.language)
+        return matrix_simhash(matrix, n=n, hashsize=self.hashsize, salt=self.salt)
     
     @lru_cache
-    def simhash_rotate(self, rotations=1, n=2, bits=128):
-        """Get this Token's simhash after bitwise a number of bitwise rotations (this is cached)"""
-        simhash = self.simhash(n=n, bits=bits)
-        actual_bitwidth = simhash.bit_length()
-        rotations %= actual_bitwidth
+    def simhash_rotate(self, rotations=1, n=DEFAULT_NGRAM_SIZE):
+        """Get this Token's simhash after n bitwise rotations (this is cached)"""
+        simhash = self.simhash(n=n)
+        rotations %= self.hashsize
         if rotations < 1:
             return simhash
-        mask = (2 ** actual_bitwidth) - 1
+        mask = (2 ** self.hashsize) - 1
         simhash &= mask
-        return (simhash >> rotations) | ((simhash << (actual_bitwidth - rotations) & mask))
+        return (simhash >> rotations) | ((simhash << (self.hashsize - rotations) & mask))
     
-    @staticmethod
-    def phoneme_vector(phoneme, language='eng'):
+    @lru_cache
+    def phoneme_vector(self, phoneme, language='eng'):
         """Get a discrete vector representation of a phoneme in the given language from PHOIBLE's data"""
         data = phoible[phoible['ISO6393'] == language]
         try:
@@ -105,10 +111,9 @@ class Token:
             print(f'Failed to find features for {phoneme!r} in {language!r}', file=sys.stderr)
             sys.exit(1)
     
-    @staticmethod
-    def phonemes_matrix(phonemes, language='eng'):
+    def phonemes_matrix(self, phonemes, language='eng', n=2):
         """Get a hashable np.ndarray subclass containing a 2D PHOIBLE feature matrix representation of the given phonemes"""
-        return Hashable_Ndarray(np.stack([Token.phoneme_vector(p, language=language) for p in phonemes]))
+        return Hashable_Ndarray(np.stack([self.phoneme_vector(p, language=language) for p in phonemes]))
     
     def as_feature_matrix(self):
         """Get a pd.DataFrame representation of the PHOIBLE features of this Token's phonemes"""
@@ -164,6 +169,8 @@ tokens = [
     Token(language='eng', graphemes='Zachary', phonemes=['z', 'æ', 'k', 'ə', 'ɹ', 'i']),
     Token(language='eng', graphemes='Zack', phonemes=['z', 'æ', 'k']),
     Token(language='fra', graphemes='Smith', phonemes=['s', 'm', 'i', 't']),
+    Token(language='fra', graphemes='Sophie', phonemes=['s', 'ɔ', 'f', 'i']),
+    Token(language='fra', graphemes='Sofia', phonemes=['s', 'ɔ', 'f', 'j', 'a']),
     Token(language='heb', graphemes='זך', phonemes=['z', 'a', 'k']),
     Token(language='heb', graphemes='עמת', phonemes=['a', 'm', 'ɪ', 't']),
     Token(language='heb', graphemes='יצח', phonemes=['j', 'i', 'ts', 'a', 'x']),
@@ -175,6 +182,10 @@ tokens = [
     Token(language='jpn', graphemes='カツヤ', phonemes=['k', 'a', 'tsː', 'ɯ', 'j', 'a']),
     Token(language='jpn', graphemes='シンゾ', phonemes=['s', 'i', 'n', 'd', 'z', 'ɔː']),
     Token(language='jpn', graphemes='スミス', phonemes=['s', 'ɯ', 'm', 'i', 's', 'ɯ']),
+    Token(language='jpn', graphemes='まさよし', phonemes=['m', 'a', 's', 'a', 'j', 'o', 's', 'i']),
+    Token(language='jpn', graphemes='ただよし', phonemes=['t', 'a', 'd', 'a', 'j', 'o', 's', 'i']),
+    Token(language='jpn', graphemes='かつら', phonemes=['k', 'a', 'tsː', 'ɯ', 'd̠', 'a']),
+    Token(language='jpn', graphemes='カツラ', phonemes=['k', 'a', 'tsː', 'ɯ', 'd̠', 'a']),
     Token(language='rus', graphemes='Алексей', phonemes=['a', 'lʲ', 'e', 'k', 'sʲ', 'e', 'j'])
 ]
 
@@ -187,28 +198,35 @@ if __name__ == '__main__':
     parser.add_argument(
         '-n', '--n-grams-size',
         type=int,
-        default=3,
+        default=DEFAULT_NGRAM_SIZE,
         help='size n for n-grams',
     )
     parser.add_argument(
-        '-b', '--bits',
+        '-b', '--bit-size',
         type=int,
-        default=128,
-        choices=hashes,
+        default=DEFAULT_HASHSIZE,
         help='LSH bit size'
     )
     parser.add_argument(
-        '-w', '--window',
+        '-w', '--window-size',
         type=int,
-        default=10,
-        help='sliding window size for comparing LSH bitwise differences',
+        default=DEFAULT_WINDOW_SIZE,
+        help='sliding window size for comparing pairs in the list of pairs sorted by LSH bitwise difference',
+    )
+    parser.add_argument(
+        '-s', '--salt',
+        type=int,
+        default=DEFAULT_SALT,
+        help='an integer salt value that will be added to the underlyin hash seed',
     )
     args = parser.parse_args()
+    Token.hashsize = args.bit_size
+    Token.salt = args.salt
     print(
         compare(
             tokens,
             n=args.n_grams_size,
-            bits=args.bits,
-            window=args.window
+            hashsize=Token.hashsize,
+            window=args.window_size
         ).to_csv(sep='\t')
     )
