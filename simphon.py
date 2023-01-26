@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 
 from dataclasses import dataclass
-from dataclasses import field
 from functools import lru_cache
 from functools import total_ordering
 from lsh_utils import compare
@@ -19,7 +18,7 @@ from lsh_utils import Hashable_Ndarray
 from lsh_utils import matrix_simhash
 from lsh_utils import phoible
 from lsh_utils import DEFAULT_HASHSIZE
-from lsh_utils import DEFAULT_NGRAM_SIZE
+from lsh_utils import SIMHASH_BITS
 from lsh_utils import DEFAULT_SEED
 from lsh_utils import DEFAULT_WINDOW_SIZE
 from typing import ClassVar
@@ -84,21 +83,10 @@ class Token:
             (other.language, other.graphemes, ' '.join(other.phonemes))
     
     @lru_cache
-    def simhash(self, n=DEFAULT_NGRAM_SIZE):
+    def simhash(self):
         """Get this Token's simhash"""
         matrix = self.phonemes_matrix(self.phonemes, language=self.language)
-        return matrix_simhash(matrix, n=n, hashsize=self.hashsize, seed=self.seed)
-    
-    @lru_cache
-    def simhash_rotate(self, rotations=1, n=DEFAULT_NGRAM_SIZE):
-        """Get this Token's simhash after n bitwise rotations (this is cached)"""
-        simhash = self.simhash(n=n)
-        rotations %= self.hashsize
-        if rotations < 1:
-            return simhash
-        mask = (2 ** self.hashsize) - 1
-        simhash &= mask
-        return (simhash >> rotations) | ((simhash << (self.hashsize - rotations) & mask))
+        return matrix_simhash(matrix, hashsize=self.hashsize, seed=self.seed)
     
     @lru_cache
     def phoneme_vector(self, phoneme, language='eng'):
@@ -111,7 +99,7 @@ class Token:
             print(f'Failed to find features for {phoneme!r} in {language!r}', file=sys.stderr)
             sys.exit(1)
     
-    def phonemes_matrix(self, phonemes, language='eng', n=2):
+    def phonemes_matrix(self, phonemes, language='eng'):
         """Get a hashable np.ndarray subclass containing a 2D PHOIBLE feature matrix representation of the given phonemes"""
         return Hashable_Ndarray(np.stack([self.phoneme_vector(p, language=language) for p in phonemes]))
     
@@ -196,12 +184,6 @@ if __name__ == '__main__':
         description=__doc__
     )
     parser.add_argument(
-        '-n', '--n-grams-size',
-        type=int,
-        default=DEFAULT_NGRAM_SIZE,
-        help='size n for n-grams',
-    )
-    parser.add_argument(
         '-b', '--bit-size',
         type=int,
         default=DEFAULT_HASHSIZE,
@@ -225,8 +207,7 @@ if __name__ == '__main__':
     print(
         compare(
             tokens,
-            n=args.n_grams_size,
-            hashsize=Token.hashsize,
+            simhash_bits=SIMHASH_BITS,
             window=args.window_size
         ).to_csv(sep='\t')
     )

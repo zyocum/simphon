@@ -7,16 +7,13 @@ from collections.abc import Hashable
 from functools import lru_cache
 from itertools import combinations
 from numpy.lib.stride_tricks import sliding_window_view
-from operator import itemgetter
 from pathlib import Path
 from xxhash import xxh128
 
-import sys
-
 DEFAULT_SEED = 0
 DEFAULT_HASHSIZE = 256
-DEFAULT_NGRAM_SIZE = 4
-DEFAULT_WINDOW_SIZE = 2
+DEFAULT_NGRAM_SIZE = 8
+DEFAULT_WINDOW_SIZE = 8
 
 def hashf(bytes_, bits=DEFAULT_HASHSIZE, seed=DEFAULT_SEED):
     """Fast underlying hashing function that can be sized to an arbitrary number of bits"""
@@ -148,54 +145,84 @@ def stride_simhash(
     window_shape = (n, n)
     if m.shape < window_shape: # too small
         return 0
-    for i, axis in enumerate(sliding_window_view(m, window_shape=window_shape)):
+    for axis in sliding_window_view(m, window_shape=window_shape):
         for view in axis:
-            for j in range(hashsize):
+            for bit in range(hashsize):
                 data = view.tobytes()
-                if hashf(data, bits=hashsize, seed=seed) & (1 << j):
-                    lsh[j] += 1
+                if hashf(data, bits=hashsize, seed=seed) & (1 << bit):
+                    lsh[bit] += 1
                 else:
-                    lsh[j] -= 1
-    return sum(int(b > 0) << i for (i, b) in enumerate(reversed(lsh)))
+                    lsh[bit] -= 1
+    return sum(int(bit > 0) << place for (place, bit) in enumerate(reversed(lsh)))
 
-lsh_features = [
+# simhash features
+features = [
+    stride_simhash,
     stride_simhash,
     segment_simhash,
     segment_simhash,
 ]
-
-matrix_transforms = [
+# matrix transforms
+transforms = [
     lambda m: Hashable_Ndarray(m),   # for 2D stride-based n-gram features
-    #lambda m: Hashable_Ndarray(m.T), # for 2D row n-gram features
-    #lambda m: Hashable_Ndarray(m),   # for 2D column n-gram features
+    lambda m: Hashable_Ndarray(m.T), # for 2D stride-based n-gram features of the transpose
+    lambda m: Hashable_Ndarray(m),   # for 2D column n-gram features
+    lambda m: Hashable_Ndarray(m.T), # for 2D row n-gram features
 ]
+assert len(features) == len(transforms)
+# n-gram sizes
+n_gram_sizes = [
+    #1,
+    #2,
+    3,
+    #4,
+    5,
+    #6,
+    7,
+    #8,
+]
+
+SIMHASH_BITS = DEFAULT_HASHSIZE * len(features) * len(n_gram_sizes) # actual simhash width in bits is dependent on hashsize, the number of features, and the number of n-gram sizes
+
+@lru_cache
+def pad(m, n):
+    # we pad the "beginning" and "end" of the matrix with (n // 2) rows so that it will always
+    # be large enough for our n-gram features to be informative
+    left_padding = np.array([np.full(m[0].shape, fill_value='^')] * (n // 2))
+    right_padding = np.array([np.full(m[0].shape, fill_value='$')] * (n // 2))
+    padded_m = np.concatenate((left_padding, m, right_padding), axis=0)
+    # we similarly pad the transpose "top" and "bottom" with (n // 2) columns
+    top_padding = np.array([np.full(padded_m.T[0].shape, fill_value='&')] * (n // 2)).T
+    bottom_padding = np.array([np.full(padded_m.T[0].shape, fill_value='%')] * (n // 2)).T
+    padded_m = np.concatenate((top_padding, padded_m, bottom_padding), axis=1)
+    return padded_m
 
 @lru_cache
 def matrix_simhash(
     m,
-    n=DEFAULT_NGRAM_SIZE,
     hashsize=DEFAULT_HASHSIZE,
     seed=DEFAULT_SEED
 ):
     """Compute a simhash by XORing simhashes of the rows and columns of a phoneme matrix
     and also a simhash using a stride-based sliding window over the phoneme matrix"""
     simhash = 0
-    # we pad the beginning and end of the matrix (n // 2) rows so that it will always
-    # be large enough for our n-gram features to be informative
-    left_padding = [np.full(m[0].shape, fill_value='^')] * (n // 2) 
-    right_padding = [np.full(m[0].shape, fill_value='$')] * (n // 2) 
-    m = np.concatenate((left_padding, m, right_padding), axis=0)
-    # iterate over variable n-gram sizes from [2...n] (we skip 1-grams because they aren't informative enough)
-    for i in range(2, n+1):
-        # simhashes for different features are bit-shifted by multiples
-        # of the bit width and the feature index so as not to interfere with one another
-        matrices = [
-            transform(m)
-            for transform in matrix_transforms
-        ]
-        for j, (lsh, matrix) in enumerate(zip(lsh_features, matrices)):
-            simhash ^= lsh(matrix, n=i, hashsize=hashsize, seed=seed) << i * j * hashsize # shift the bits left so bits from different features/n-gram sizes don't clobber one another
+    # simhashes for different features are bit-shifted by multiples
+    # of the bit width and the feature index so as not to interfere with one another
+    #matrices = [transform(m) for transform in transforms]
+    for i, (lsh, transform) in enumerate(zip(features, transforms)):
+        for j in n_gram_sizes:
+            simhash ^= lsh(transform(pad(m, j)), n=j, hashsize=hashsize, seed=seed) << hashsize * i * j # shift the bits left so bits from different features/n-gram sizes don't clobber one another
     return simhash
+
+@lru_cache
+def rotate(simhash, bits, rotations=1):
+    """Bitwise rotate a simhash with bits bits"""
+    rotations %= bits
+    if rotations < 1:
+        return simhash
+    mask = (2 ** bits) - 1
+    simhash &= mask
+    return (simhash >> rotations) | (simhash << (bits - rotations) & mask)
 
 def load_phoible(path='phoible.csv', cache=True):
     """Download the PHOIBLE data and load it as a dataframe suitable for further processing"""
@@ -216,35 +243,33 @@ def simdiff(a, b):
     difference = sum(((xor & (1 << i)) > 0) for i in range(bits))
     return difference
 
-def ranked_pairs(
+def candidates(
     tokens,
-    n=DEFAULT_NGRAM_SIZE,
-    hashsize=DEFAULT_HASHSIZE,
+    simhash_bits=SIMHASH_BITS,
     window=DEFAULT_WINDOW_SIZE
 ):
-    """Generate ranked pairs of tokens sorted by their LSH similarity
+    """Generate candidate token pairs and their LSH bitwise differences
     
-    Will generate records of the form: ((a:Token, b:Token), difference:int)
+    Will generate tuples of the form: ((a:Token, b:Token), difference:int)
     """
-    d = {}
-    actual_bitwidth = hashsize * (n - 1) * len(lsh_features) # actual simhash width in bits is dependent on hashsize, the range over n, and the number of features
+    d = set()
     # rotate over each bit in the simhash
-    for i in range(actual_bitwidth):
+    for i in range(simhash_bits):
         def lsh(token):
-            return token.simhash_rotate(rotations=i, n=n)
+            return rotate(token.simhash(), simhash_bits, rotations=i)
         for ngram in ngrams(sorted(tokens, key=lsh), n=window):
             # check each pairwise combination within the window
             for a, b in combinations(ngram, 2):
                 key = tuple(sorted((a, b)))
                 if key not in d:
                     token_a, token_b = key
-                    d[key] = simdiff(lsh(a), lsh(b))
-    yield from sorted(d.items(), key=itemgetter(1, 0))
+                    difference = simdiff(lsh(a), lsh(b))
+                    yield key, difference
+                    d.add(key)
 
 def compare(
     tokens,
-    n=DEFAULT_NGRAM_SIZE,
-    hashsize=DEFAULT_HASHSIZE,
+    simhash_bits=SIMHASH_BITS,
     window=DEFAULT_WINDOW_SIZE
 ):
     """Return a datafram comparing pairs of Tokens sorted by phonemic similarity
@@ -260,17 +285,17 @@ def compare(
         from tqdm.notebook import tqdm
     except:
         from tqdm import tqdm
-    pairs = tqdm(
-        list(ranked_pairs(tokens, n=n, hashsize=hashsize, window=window)),
+    with tqdm(
+        candidates(tokens, simhash_bits=simhash_bits, window=window),
         desc='ranking pairs by bitwise similarity',
         unit='pair'
-    )
-    actual_bitwidth = hashsize * (n - 1) * len(lsh_features) # actual simhash width in bits is dependent on hashsize, the range over n, and the number of features
-    return pd.DataFrame(
-        {
-            'a': a,
-            'b': b,
-            'simhash difference (in bits)': difference,
-            'similarity score': f'{1.0 - (difference/actual_bitwidth):0.3}'
-        } for ((a, b), difference) in pairs
-    )
+    ) as pairs:
+        df = pd.DataFrame(
+            {
+                'a': a,
+                'b': b,
+                'simhash difference (in bits)': difference,
+                'similarity score': f'{1.0 - (difference/simhash_bits):0.3}'
+            } for ((a, b), difference) in pairs
+        )
+        return df.sort_values('simhash difference (in bits)', ignore_index=True)
