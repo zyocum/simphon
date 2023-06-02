@@ -6,14 +6,19 @@ import numpy as np
 from collections.abc import Hashable
 from functools import lru_cache
 from itertools import combinations
+from itertools import chain
 from numpy.lib.stride_tricks import sliding_window_view
 from pathlib import Path
 from xxhash import xxh128
+from tqdm.auto import tqdm
+
+tqdm.monitor_interval = 1.0
 
 DEFAULT_SEED = 0
 DEFAULT_HASHSIZE = 256
-DEFAULT_NGRAM_SIZE = 8
-DEFAULT_WINDOW_SIZE = 8
+DEFAULT_NGRAM_SIZE = 3
+DEFAULT_WINDOW_SIZE = 2
+CACHE_SIZE = 2 ** 20
 
 def hashf(bytes_, bits=DEFAULT_HASHSIZE, seed=DEFAULT_SEED):
     """Fast underlying hashing function that can be sized to an arbitrary number of bits"""
@@ -68,7 +73,7 @@ def ngrams(iterable, n=2):
         enumerate(tee(iter(iterable), n))
     ))
 
-@lru_cache
+@lru_cache(maxsize=CACHE_SIZE)
 def segment_simhash(
     m,
     n=DEFAULT_NGRAM_SIZE,
@@ -77,7 +82,7 @@ def segment_simhash(
 ):
     """Compute a simhash over the bytes of n-grams of rows in a matrix
     
-    This strategy uses a 1D sliding window of size n that is iterated across the matrix
+    This strategy uses a sliding window of size n that is iterated across the matrix
     
     E.g., for a 5 x 5 matrix, the 3-gram sliding windows are marked with "x"s below:
     
@@ -102,7 +107,7 @@ def segment_simhash(
                 lsh[j] -= 1
     return sum(int(b > 0) << i for (i, b) in enumerate(reversed(lsh)))
 
-@lru_cache
+@lru_cache(maxsize=CACHE_SIZE)
 def stride_simhash(
     m,
     n=DEFAULT_NGRAM_SIZE,
@@ -184,7 +189,7 @@ n_gram_sizes = [
 
 SIMHASH_BITS = DEFAULT_HASHSIZE * len(features) * len(n_gram_sizes) # actual simhash width in bits is dependent on hashsize, the number of features, and the number of n-gram sizes
 
-@lru_cache
+@lru_cache(maxsize=CACHE_SIZE)
 def pad(m, n):
     # we pad the "beginning" and "end" of the matrix with (n // 2) rows so that it will always
     # be large enough for our n-gram features to be informative
@@ -197,7 +202,7 @@ def pad(m, n):
     padded_m = np.concatenate((top_padding, padded_m, bottom_padding), axis=1)
     return padded_m
 
-@lru_cache
+@lru_cache(maxsize=CACHE_SIZE)
 def matrix_simhash(
     m,
     hashsize=DEFAULT_HASHSIZE,
@@ -214,7 +219,7 @@ def matrix_simhash(
             simhash ^= lsh(transform(pad(m, j)), n=j, hashsize=hashsize, seed=seed) << hashsize * i * j # shift the bits left so bits from different features/n-gram sizes don't clobber one another
     return simhash
 
-@lru_cache
+@lru_cache(maxsize=CACHE_SIZE)
 def rotate(simhash, bits, rotations=1):
     """Bitwise rotate a simhash with bits bits"""
     rotations %= bits
@@ -267,35 +272,101 @@ def candidates(
                     yield key, difference
                     d.add(key)
 
+def candidates(
+    queries,
+    tokens,
+    simhash_bits=SIMHASH_BITS,
+    window=DEFAULT_WINDOW_SIZE
+):
+    """Generate candidate token pairs and their LSH bitwise differences
+    
+    Will generate tuples of the form: ((a:Token, b:Token), difference:int)
+    """
+    d = set()
+    # rotate over each bit in the simhash
+    for i in range(simhash_bits):
+        def lsh(token):
+            return rotate(token.simhash(), simhash_bits, rotations=i)
+        for ngram in ngrams(sorted(chain(queries, tokens), key=lsh), n=window):
+            if not(any(queries)) or (set(ngram) & set(queries)):
+                # check each pairwise combination within the window
+                for a, b in combinations(ngram, 2):
+                    if not(any(queries)) or ({a, b} & set(queries)):
+                        key = tuple(sorted((a, b)))
+                        if key not in d:
+                            token_a, token_b = key
+                            difference = simdiff(lsh(a), lsh(b))
+                            yield key, difference
+                            d.add(key)
+
 def compare(
     tokens,
     simhash_bits=SIMHASH_BITS,
     window=DEFAULT_WINDOW_SIZE
 ):
-    """Return a datafram comparing pairs of Tokens sorted by phonemic similarity
+    """Generate comparison records considering all tokens
     
-    Dataframe columns:
+    Records contain the following:
     "a": the first token of the pair
     "b": the second token of the pair
     "simhash difference (in bits)": the bitwise difference between the simhash of a and the simhash of b
     "sigma(phonemic)": the phonemic similarity score for the pair (a, b) computed by: 1 - (difference/(2*bits)
     """
-    try:
-        get_ipython
-        from tqdm.notebook import tqdm
-    except:
-        from tqdm import tqdm
+    queries = set()
     with tqdm(
-        candidates(tokens, simhash_bits=simhash_bits, window=window),
-        desc='ranking pairs by bitwise similarity',
-        unit='pair'
+        candidates(
+            queries,
+            tokens,
+            simhash_bits=simhash_bits,
+            window=window
+        ),
+        desc='comparing pairs',
+        unit='pair',
+        miniters=1,
+        mininterval=0,
+        dynamic_ncols=True,
+        disable=None,
     ) as pairs:
-        df = pd.DataFrame(
-            {
+        for ((a, b), difference) in pairs:
+            yield {
                 'a': a,
                 'b': b,
                 'simhash difference (in bits)': difference,
                 'similarity score': f'{1.0 - (difference/simhash_bits):0.3}'
-            } for ((a, b), difference) in pairs
-        )
-        return df.sort_values('simhash difference (in bits)', ignore_index=True)
+            }
+
+def search(
+    queries,
+    tokens,
+    simhash_bits=SIMHASH_BITS,
+    window=DEFAULT_WINDOW_SIZE
+):
+    """Generate comparison records considering only queries against all tokens
+    
+    Records contain the following:
+    "a": the first token of the pair
+    "b": the second token of the pair
+    "simhash difference (in bits)": the bitwise difference between the simhash of a and the simhash of b
+    "sigma(phonemic)": the phonemic similarity score for the pair (a, b) computed by: 1 - (difference/(2*bits)
+    """
+    with tqdm(
+        candidates(
+            queries,
+            tokens,
+            simhash_bits=simhash_bits,
+            window=window
+        ),
+        desc='querying',
+        unit='pair',
+        miniters=1,
+        mininterval=0,
+        dynamic_ncols=True,
+        disable=None,
+    ) as pairs:
+        for ((a, b), difference) in pairs:
+            yield {
+                'a': a,
+                'b': b,
+                'simhash difference (in bits)': difference,
+                'similarity score': f'{1.0 - (difference/simhash_bits):0.3}'
+            }
